@@ -99,7 +99,7 @@ test('should update Firebase', async function(assert) {
   }));
 });
 
-test('should push realtime changes to store', async function(assert) {
+test('should track changes to record when not in FastBoot', async function(assert) {
   assert.expect(1);
 
   // Arrange
@@ -127,7 +127,7 @@ test('should push realtime changes to store', async function(assert) {
   });
 });
 
-test('should track Firebase listeners without path when not in FastBoot', async function(assert) {
+test('should not track changes to record when in FastBoot', async function(assert) {
   assert.expect(1);
 
   // Arrange
@@ -135,58 +135,7 @@ test('should track Firebase listeners without path when not in FastBoot', async 
     'blogPosts/post_c/message': 'Message',
     'blogPosts/post_c/timestamp': firebase.database.ServerValue.TIMESTAMP,
   };
-  const adapter = this.subject({
-    firebase: this.ref,
-    serialize: sinon.stub().returns(serializedSnapshot),
-  });
-
-  // Act
-  await adapter.createRecord(this.store, this.type, {
-    id: 'post_c',
-    message: 'Message',
-    timestamp: firebase.database.ServerValue.TIMESTAMP,
-  });
-  const result = adapter.get('trackedListeners');
-
-  // Assert
-  assert.deepEqual(result, { 'blogPosts/post_c': { value: true } });
-});
-
-test('should track Firebase listeners with path when not in FastBoot', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const serializedSnapshot = {
-    'comments/post_a/comment_c/message': 'Message',
-    'comments/post_a/comment_c/timestamp':
-        firebase.database.ServerValue.TIMESTAMP,
-  };
-  const adapter = this.subject({
-    firebase: this.ref,
-    serialize: sinon.stub().returns(serializedSnapshot),
-  });
-
-  // Act
-  await adapter.createRecord(this.store, { modelName: 'comment' }, {
-    id: 'comment_a',
-    message: 'Message',
-    timestamp: firebase.database.ServerValue.TIMESTAMP,
-    adapterOptions: { path: 'comments/post_a' },
-  });
-  const result = adapter.get('trackedListeners');
-
-  // Assert
-  assert.deepEqual(result, { 'comments/post_a/comment_a': { value: true } });
-});
-
-test('should not track Firebase listeners when in FastBoot', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const serializedSnapshot = {
-    'blogPosts/post_c/message': 'Message',
-    'blogPosts/post_c/timestamp': firebase.database.ServerValue.TIMESTAMP,
-  };
+  const spy = sinon.spy(this.store, 'push');
   const adapter = this.subject({
     firebase: this.ref,
     fastboot: EmberObject.create({ isFastBoot: true }),
@@ -199,36 +148,12 @@ test('should not track Firebase listeners when in FastBoot', async function(asse
     message: 'Message',
     timestamp: firebase.database.ServerValue.TIMESTAMP,
   });
-  const result = adapter.get('trackedListeners');
+  await this.ref.child('blogPosts/post_c').update({ 'message': 'Foo' });
 
   // Assert
-  assert.deepEqual(result, {});
-});
-
-test('should not duplicate pushing realtime changes to store', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const serializedSnapshot = {
-    'blogPosts/post_c/message': 'Message',
-    'blogPosts/post_c/timestamp': firebase.database.ServerValue.TIMESTAMP,
-  };
-  const spy = sinon.spy(this.store, 'push');
-  const adapter = this.subject({
-    firebase: this.ref,
-    trackedListeners: { 'blogPosts/post_c': { value: true } },
-    serialize: sinon.stub().returns(serializedSnapshot),
+  next(() => {
+    assert.ok(spy.notCalled);
   });
-
-  // Act
-  await adapter.createRecord(this.store, this.type, {
-    id: 'post_c',
-    message: 'Message',
-    timestamp: firebase.database.ServerValue.TIMESTAMP,
-  });
-
-  // Assert
-  assert.ok(spy.notCalled);
 });
 
 test('should unload record when it gets deleted from the backend', async function(assert) {
@@ -378,7 +303,7 @@ test('should error when record does not exist', function(assert) {
   });
 });
 
-test('should push realtime changes to store', async function(assert) {
+test('should track changes to record when not in FastBoot', async function(assert) {
   assert.expect(1);
 
   // Arrange
@@ -397,44 +322,11 @@ test('should push realtime changes to store', async function(assert) {
   });
 });
 
-test('should track Firebase listeners without path when not in FastBoot', async function(assert) {
+test('should not track changes to record when in FastBoot', async function(assert) {
   assert.expect(1);
 
   // Arrange
-  const adapter = this.subject({
-    firebase: this.ref,
-  });
-
-  // Act
-  await adapter.findRecord(this.store, this.type, 'post_a');
-  const result = adapter.get('trackedListeners');
-
-  // Arrange
-  assert.deepEqual(result, { 'blogPosts/post_a': { value: true } });
-});
-
-test('should track Firebase listeners with path when not in FastBoot', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const adapter = this.subject({
-    firebase: this.ref,
-  });
-
-  // Act
-  await adapter.findRecord(this.store, { modelName: 'comment' }, 'comment_a', {
-    adapterOptions: { path: 'comments/post_a' },
-  });
-  const result = adapter.get('trackedListeners');
-
-  // Arrange
-  assert.deepEqual(result, { 'comments/post_a/comment_a': { value: true } });
-});
-
-test('should not track Firebase listeners when in FastBoot', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
+  const spy = sinon.spy(this.store, 'push');
   const adapter = this.subject({
     firebase: this.ref,
     fastboot: EmberObject.create({ isFastBoot: true }),
@@ -442,27 +334,31 @@ test('should not track Firebase listeners when in FastBoot', async function(asse
 
   // Act
   await adapter.findRecord(this.store, this.type, 'post_a');
-  const result = adapter.get('trackedListeners');
 
   // Arrange
-  assert.deepEqual(result, {});
+  next(() => {
+    assert.ok(spy.notCalled);
+  });
 });
 
-test('should not duplicate pushing realtime changes to store', async function(assert) {
+test('should not duplicate trackers', async function(assert) {
   assert.expect(1);
 
   // Arrange
   const spy = sinon.spy(this.store, 'push');
   const adapter = this.subject({
     firebase: this.ref,
-    trackedListeners: { 'blogPosts/post_a': { value: true } },
   });
 
   // Act
   await adapter.findRecord(this.store, this.type, 'post_a');
+  await adapter.findRecord(this.store, this.type, 'post_a');
+  await this.ref.child('blogPosts/post_a').update({ 'message': 'Foo' });
 
   // Arrange
-  assert.ok(spy.notCalled);
+  next(() => {
+    assert.ok(spy.calledTwice);
+  });
 });
 
 test('should unload record when it gets deleted from the backend', async function(assert) {

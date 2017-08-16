@@ -34,14 +34,21 @@ export default Adapter.extend({
 
   /**
    * @type {Object}
-   * @protected
+   * @private
+   * @default
+   */
+  trackedRecords: null,
+
+  /**
+   * @type {Object}
+   * @private
    * @default
    */
   trackedListeners: {},
 
   /**
    * @type {Object}
-   * @protected
+   * @private
    * @default
    */
   trackedQueries: {},
@@ -55,6 +62,15 @@ export default Adapter.extend({
   fastboot: computed(function() {
     return getOwner(this).lookup('service:fastboot');
   }),
+
+  /**
+   * Adapter hook
+   */
+  init() {
+    this._super(...arguments);
+
+    this.set('trackedRecords', {});
+  },
 
   /**
    * Generates an ID for a record using Firebase push API
@@ -95,11 +111,12 @@ export default Adapter.extend({
         if (error) {
           reject(new Error(error));
         } else {
-          const path = snapshot.adapterOptions && snapshot.adapterOptions.path ?
-              snapshot.adapterOptions.path : null;
+          const modelName = type.modelName;
+          const id = snapshot.id;
+          const path = this.buildPath(modelName, id, snapshot.adapterOptions);
+          const ref = this.buildFirebaseReference(path);
 
-          this._setupValueListener(store, type.modelName, snapshot.id, path);
-
+          this.listenForRecordChanges(store, modelName, id, ref);
           resolve();
         }
       }));
@@ -117,20 +134,18 @@ export default Adapter.extend({
    */
   findRecord(store, type, id, snapshot = {}) {
     return new RSVP.Promise(bind(this, (resolve, reject) => {
-      const path = snapshot.adapterOptions && snapshot.adapterOptions.path ?
-          snapshot.adapterOptions.path : null;
       const modelName = type.modelName;
+      const path = this.buildPath(modelName, id, snapshot.adapterOptions);
+      const ref = this.buildFirebaseReference(path);
       const onValue = bind(this, (snapshot) => {
         if (snapshot.exists()) {
-          this._setupValueListener(store, modelName, id, path);
+          this.listenForRecordChanges(store, modelName, id, ref);
           ref.off('value', onValue);
-          resolve(this._getGetSnapshotWithId(snapshot));
+          resolve(this.mergeSnapshotIdAndValue(snapshot));
         } else {
-          reject(new Error('Record doesn\'t exist'));
+          reject(new Error(`Record ${id} for type ${modelName} not found`));
         }
       });
-
-      let ref = this._getFirebaseReference(modelName, id, path);
 
       ref.on('value', onValue, bind(this, (error) => {
         reject(new Error(error));
@@ -304,6 +319,180 @@ export default Adapter.extend({
         reject(new Error(error));
       }));
     }));
+  },
+
+  /**
+   * Builds the path for a type
+   *
+   * @param {string} modelName
+   * @param {string} id
+   * @param {Object} adapterOptions
+   * @return {string} Path
+   * @private
+   */
+  buildPath(modelName, id, adapterOptions) {
+    let path;
+
+    if (adapterOptions && adapterOptions.path) {
+      path = `${adapterOptions.path}/${id}`;
+    } else {
+      const parsedModelName = this.parseModelName(modelName);
+
+      path = `${parsedModelName}/${id}`;
+    }
+
+    return path;
+  },
+
+  /**
+   * Returns a model name in its camelized and pluralized form
+   *
+   * @param {string} modelName
+   * @return {string} Camelized and pluralized model name
+   * @private
+   */
+  parseModelName(modelName) {
+    return camelize(pluralize(modelName));
+  },
+
+  /**
+   * Builds a Firebase reference for a path
+   *
+   * @param {string} path
+   * @return {firebase.database.Reference} Firebase reference
+   * @private
+   */
+  buildFirebaseReference(path) {
+    return this.get('firebase').child(path);
+  },
+
+  /**
+   * Listens for changes in the record
+   *
+   * @param {DS.Store} store
+   * @param {string} modelName
+   * @param {string} id
+   * @param {firebase.database.Reference} ref
+   * @private
+   */
+  listenForRecordChanges(store, modelName, id, ref) {
+    if (!this.isInFastBoot()) {
+      if (!this.isTrackingRecordChanges(modelName, id)) {
+        this.trackRecord(modelName, id, ref);
+
+        ref.on('value', bind(this, (snapshot) => {
+          if (snapshot.exists()) {
+            const snapshotWithId = this.mergeSnapshotIdAndValue(snapshot);
+            const normalizedRecord = store.normalize(modelName, snapshotWithId);
+
+            next(() => {
+              store.push(normalizedRecord);
+            });
+          } else {
+            this.unloadRecord(store, modelName, id);
+          }
+        }), bind(this, (error) => {
+          this.unloadRecord(store, modelName, id);
+        }));
+      }
+    }
+  },
+
+  /**
+   * Checks if in FastBoot
+   *
+   * @return {boolean} True if in FastBoot. Otherwise, false.
+   * @private
+   */
+  isInFastBoot() {
+    const fastboot = this.get('fastboot');
+
+    return fastboot && fastboot.get('isFastBoot');
+  },
+
+  /**
+   * Checks if changes to record is being tracked
+   *
+   * @param {string} modelName
+   * @param {string} id
+   * @return {boolean} True if being tracked. Otherwise, false.
+   * @private
+   */
+  isTrackingRecordChanges(modelName, id) {
+    const trackedRecords = this.get('trackedRecords');
+
+    if (trackedRecords.hasOwnProperty(modelName)) {
+      if (trackedRecords[modelName].hasOwnProperty(id)) {
+        return true;
+      }
+    }
+
+    return false;
+  },
+
+  /**
+   * Tracks a record
+   *
+   * @param {string} modelName
+   * @param {string} id
+   * @param {firebase.database.Reference} ref
+   * @private
+   */
+  trackRecord(modelName, id, ref) {
+    const trackedRecords = this.get('trackedRecords');
+
+    trackedRecords[modelName] = {};
+    trackedRecords[modelName][id] = this.parseFirebaseReferencePath(ref);
+  },
+
+  /**
+   * Gets the path of a Firebase reference without its origin
+   *
+   * @param {firebase.database.Reference} ref
+   * @return {string} Path
+   * @private
+   */
+  parseFirebaseReferencePath(ref) {
+    return ref.toString().substring(ref.root.toString().length);
+  },
+
+  /**
+   * Merges a snapshot's key with its value in a single object
+   *
+   * @param {firebase.database.DataSnapshot} snapshot
+   * @return {Object} Snapshot
+   * @private
+   */
+  mergeSnapshotIdAndValue(snapshot) {
+    const ref = snapshot.ref;
+    const referencePath = ref.toString().substring(ref.root.toString().length);
+    const pathNodes = referencePath.split('/');
+
+    pathNodes.shift();
+    pathNodes.pop();
+
+    const newSnapshot = snapshot.val();
+
+    newSnapshot.id = snapshot.key;
+    newSnapshot[this.get('innerReferencePathName')] = pathNodes.join('/');
+
+    return newSnapshot;
+  },
+
+  /**
+   * Unloads a record
+   *
+   * @param {DS.Store} store
+   * @param {string} modelName
+   * @param {string} id
+   * @private
+   */
+  unloadRecord(store, modelName, id) {
+    const record = store.peekRecord(modelName, id);
+
+    if (record && !record.get('isSaving')) {
+      store.unloadRecord(record);
+    }
   },
 
   /**
