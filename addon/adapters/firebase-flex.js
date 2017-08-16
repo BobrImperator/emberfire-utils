@@ -19,6 +19,7 @@ export default Adapter.extend({
 
   /**
    * @type {Ember.Service}
+   * @protected
    * @default
    * @readonly
    */
@@ -26,24 +27,28 @@ export default Adapter.extend({
 
   /**
    * @type {string}
+   * @protected
    * @default
    */
   innerReferencePathName: '_innerReferencePath',
 
   /**
    * @type {Object}
+   * @protected
    * @default
    */
   trackedListeners: {},
 
   /**
    * @type {Object}
+   * @protected
    * @default
    */
   trackedQueries: {},
 
   /**
    * @type {Ember.Service}
+   * @protected
    * @default
    * @readonly
    */
@@ -52,6 +57,8 @@ export default Adapter.extend({
   }),
 
   /**
+   * Generates an ID for a record using Firebase push API
+   *
    * @return {string} Push ID
    */
   generateIdForRecord() {
@@ -59,6 +66,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Creates a record
+   *
    * @param {DS.Store} store
    * @param {DS.Model} type
    * @param {DS.Snapshot} snapshot
@@ -69,6 +78,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Updates a record
+   *
    * @param {DS.Store} store
    * @param {DS.Model} type
    * @param {DS.Snapshot} snapshot
@@ -96,6 +107,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Finds a record
+   *
    * @param {DS.Store} store
    * @param {DS.Model} type
    * @param {string} id
@@ -126,6 +139,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Finds all records for a model
+   *
    * @param {DS.Store} store
    * @param {DS.Model} type
    * @return {Promise} Resolves with the fetched records
@@ -160,6 +175,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Deletes a record
+   *
    * @param {DS.Store} store
    * @param {DS.Model} type
    * @param {DS.Snapshot} snapshot
@@ -195,6 +212,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Queries for a single record
+   *
    * @param {DS.Store} store
    * @param {DS.Model} type
    * @param {Object} [query={}]
@@ -236,6 +255,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Queries for some records
+   *
    * @param {DS.Store} store
    * @param {DS.Model} type
    * @param {Object} [query={}]
@@ -286,6 +307,9 @@ export default Adapter.extend({
   },
 
   /**
+   * Sets up listener that updates a records whenever it changes in
+   * Firebase
+   *
    * @param {DS.Store} store
    * @param {string} modelName
    * @param {string} id
@@ -323,6 +347,9 @@ export default Adapter.extend({
   },
 
   /**
+   * Sets up listener that adds records to the store for a certain
+   * model whenever a data gets added in Firebase
+   *
    * @param {DS.Store} store
    * @param {string} modelName
    * @private
@@ -346,6 +373,9 @@ export default Adapter.extend({
   },
 
   /**
+   * Sets up a listener that updates the result of queries for every
+   * new or removed records in Firebase
+   *
    * @param {DS.Store} store
    * @param {string} modelName
    * @param {string} recordPath
@@ -386,6 +416,9 @@ export default Adapter.extend({
   },
 
   /**
+   * Sets up properties in query results that allows to load more
+   * data in its result
+   *
    * @param {DS.AdapterPopulatedRecordArray} recordArray
    * @param {firebase.database.DataSnapshot} ref
    * @param {function} onChildAdded
@@ -419,6 +452,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Sets up sorting and filtering for queries
+   *
    * @param {firebase.database.DataSnapshot} ref
    * @param {Object} query
    * @param {boolean} isForcingLimitToOne
@@ -467,6 +502,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Returns the Firebase snapshot with an ID property
+   *
    * @param {firebase.database.DataSnapshot} snapshot
    * @return {Object} Snapshot with ID
    * @private
@@ -488,6 +525,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Returns the Firebase reference for a model
+   *
    * @param {string} modelName
    * @param {string} [id='']
    * @param {string} [path]
@@ -505,6 +544,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Returns a model name in its camelized and pluralized form
+   *
    * @param {string} modelName
    * @return {string} Camelized and pluralized model name
    */
@@ -513,6 +554,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Unloads a record
+   *
    * @param {DS.Store} store
    * @param {string} modelName
    * @param {string} id
@@ -527,6 +570,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Checks if a listener was already set up for a record
+   *
    * @param {string} key trackedListeners key
    * @param {string} type Type of listener (value, child_added, etc.)
    * @return {boolean} True if already tracked. Otherwise, false.
@@ -539,6 +584,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Tracks a type of listener that's been setup for a record
+   *
    * @param {string} key trackedListeners key
    * @param {string} type Type of listener (value, child_added, etc.)
    * @private
@@ -558,6 +605,8 @@ export default Adapter.extend({
   },
 
   /**
+   * Tracks a query request
+   *
    * @param {string} cacheId
    * @param {DS.AdapterPopulatedRecordArray} recordArray
    * @private
