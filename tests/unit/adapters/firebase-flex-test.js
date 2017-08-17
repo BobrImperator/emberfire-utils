@@ -461,46 +461,7 @@ test('should error when finding all records for a model but nothing exists', fun
   });
 });
 
-test('should track Firebase listeners when finding all records for a model and not in FastBoot', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const adapter = this.subject({
-    firebase: this.ref,
-    findRecord: this.findRecord,
-  });
-
-  // Act
-  await adapter.findAll(this.store, this.type);
-  const result = adapter.get('trackedListeners');
-
-  // Arrange
-  assert.deepEqual(result, {
-    'blogPosts': { child_added: true },
-    'blogPosts/post_a': { value: true },
-    'blogPosts/post_b': { value: true },
-  });
-});
-
-test('should not track Firebase listeners when finding all records for a model and in FastBoot', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const adapter = this.subject({
-    firebase: this.ref,
-    fastboot: EmberObject.create({ isFastBoot: true }),
-    findRecord: this.findRecord,
-  });
-
-  // Act
-  await adapter.findAll(this.store, this.type);
-  const result = adapter.get('trackedListeners');
-
-  // Arrange
-  assert.deepEqual(result, {});
-});
-
-test('should push realtime child_added changes to store after finding all records for a model', async function(assert) {
+test('should track changes to list when not in FastBoot', async function(assert) {
   assert.expect(1);
 
   // Arrange
@@ -512,16 +473,29 @@ test('should push realtime child_added changes to store after finding all record
 
   // Act
   await adapter.findAll(this.store, this.type);
-  await this.ref.child('blogPosts/post_c').update({
-    message: 'Post C',
-    timestamp: 1483228800000,
-    author: 'user_a',
-  });
+  await this.ref.child('blogPosts/post_c').update({ 'message': 'Foo' });
 
   // Arrange
-  next(() => {
-    assert.ok(spy.calledThrice);
+  assert.ok(spy.calledThrice);
+});
+
+test('should not track changes to list when in FastBoot', async function(assert) {
+  assert.expect(1);
+
+  // Arrange
+  const spy = sinon.spy(this.store, 'push');
+  const adapter = this.subject({
+    firebase: this.ref,
+    fastboot: EmberObject.create({ isFastBoot: true }),
+    findRecord: this.findRecord,
   });
+
+  // Act
+  await adapter.findAll(this.store, this.type);
+  await this.ref.child('blogPosts/post_c').update({ 'message': 'Foo' });
+
+  // Arrange
+  assert.ok(spy.notCalled);
 });
 
 moduleFor('adapter:firebase-flex', 'Unit | Adapter | firebase flex | deleteRecord', {
@@ -530,6 +504,21 @@ moduleFor('adapter:firebase-flex', 'Unit | Adapter | firebase flex | deleteRecor
   beforeEach() {
     stubFirebase();
     this.ref = createOfflineRef(getFixtureData());
+    this.record = EmberObject.create({
+      id: 'post_a',
+      message: 'Post A',
+      timestamp: 1483228800000,
+      author: 'user_a',
+      isSaving: false,
+      adapterOptions: { include: { 'users/user_a': null } },
+    });
+    this.store = {
+      normalize() {},
+      peekRecord: sinon.stub().returns(this.record),
+      push() {},
+      unloadRecord: sinon.stub(),
+    };
+    this.type = { modelName: 'blog-post' };
   },
 
   afterEach() {
@@ -538,7 +527,7 @@ moduleFor('adapter:firebase-flex', 'Unit | Adapter | firebase flex | deleteRecor
   },
 });
 
-test('should remove record from Firebase when deleting a record without path', async function(assert) {
+test('should remove from Firebase when deleting record', async function(assert) {
   assert.expect(1);
 
   // Arrange
@@ -547,39 +536,13 @@ test('should remove record from Firebase when deleting a record without path', a
     firebase: this.ref,
   });
 
+  await adapter.findRecord(this.store, this.type, 'post_a');
+
   // Act
-  await adapter.deleteRecord({}, { modelName: 'blog-post' }, {
-    id: 'post_a',
-    message: 'Post A',
-    timestamp: 1483228800000,
-    author: 'user_a',
-    adapterOptions: { include: { 'users/user_a': null } },
-  });
+  await adapter.deleteRecord({}, { modelName: 'blog-post' }, this.record);
 
   // Assert
   assert.ok(spy.calledWith({ 'blogPosts/post_a': null, 'users/user_a': null }));
-});
-
-test('should remove record from Firebase when deleting a record with path', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const spy = sinon.spy(this.ref, 'update');
-  const adapter = this.subject({
-    firebase: this.ref,
-  });
-
-  // Act
-  await adapter.deleteRecord({}, { modelName: 'comment' }, {
-    id: 'comment_a',
-    message: 'Comment A',
-    timestamp: 1483228800000,
-    author: 'user_b',
-    adapterOptions: { path: 'comments/post_a' },
-  });
-
-  // Assert
-  assert.ok(spy.calledWith({ 'comments/post_a/comment_a': null }));
 });
 
 moduleFor('adapter:firebase-flex', 'Unit | Adapter | firebase flex | queryRecord', {

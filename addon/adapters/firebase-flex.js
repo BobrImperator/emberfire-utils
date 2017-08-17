@@ -37,7 +37,7 @@ export default Adapter.extend({
    * @private
    * @default
    */
-  trackedRecords: null,
+  trackerInfo: null,
 
   /**
    * @type {Object}
@@ -69,7 +69,7 @@ export default Adapter.extend({
   init() {
     this._super(...arguments);
 
-    this.set('trackedRecords', {});
+    this.set('trackerInfo', {});
   },
 
   /**
@@ -103,6 +103,19 @@ export default Adapter.extend({
    */
   updateRecord(store, type, snapshot) {
     return new RSVP.Promise(bind(this, (resolve, reject) => {
+      const modelName = type.modelName;
+      const id = snapshot.id;
+
+      if (this.isTracked(modelName, id)) {
+        const adapterOptions = snapshot.adapterOptions;
+
+        if (!adapterOptions) {
+          snapshot.adapterOptions = {};
+        }
+
+        adapterOptions.path = this.get('trackerInfo')[modelName][id];
+      }
+
       const serializedSnapshot = this.serialize(snapshot, {
         innerReferencePathName: this.get('innerReferencePathName'),
       });
@@ -111,8 +124,6 @@ export default Adapter.extend({
         if (error) {
           reject(new Error(error));
         } else {
-          const modelName = type.modelName;
-          const id = snapshot.id;
           const path = this.buildPath(modelName, id, snapshot.adapterOptions);
           const ref = this.buildFirebaseReference(path);
 
@@ -163,7 +174,8 @@ export default Adapter.extend({
   findAll(store, type) {
     return new RSVP.Promise(bind(this, (resolve, reject) => {
       const modelName = type.modelName;
-      const ref = this._getFirebaseReference(modelName);
+      const path = this.buildPath(modelName);
+      const ref = this.buildFirebaseReference(path);
 
       ref.on('value', bind(this, (snapshot) => {
         const findRecordPromises = [];
@@ -174,14 +186,14 @@ export default Adapter.extend({
           });
 
           RSVP.all(findRecordPromises).then(bind(this, (records) => {
-            this._setupListListener(store, modelName);
+            this.listenForListChanges(store, modelName, ref);
             ref.off('value');
             resolve(records);
           })).catch(bind(this, (error) => {
             reject(new Error(error));
           }));
         } else {
-          reject(new Error('Record doesn\'t exist'));
+          reject(new Error(`No records found for type ${modelName}`));
         }
       }), bind(this, (error) => {
         reject(new Error(error));
@@ -199,20 +211,17 @@ export default Adapter.extend({
    */
   deleteRecord(store, type, snapshot) {
     return new RSVP.Promise(bind(this, (resolve, reject) => {
-      const modelName = this._getParsedModelName(type.modelName);
+      const modelName = type.modelName;
       const id = snapshot.id;
+      const path = this.get('trackerInfo')[modelName][id];
       const adapterOptions = snapshot.adapterOptions;
       const fanout = {};
+
+      fanout[`${path}/${id}`] = null;
 
       if (adapterOptions) {
         if (adapterOptions.hasOwnProperty('include')) {
           assign(fanout, adapterOptions.include);
-        }
-
-        if (adapterOptions.hasOwnProperty('path')) {
-          fanout[`${adapterOptions.path}/${id}`] = null;
-        } else {
-          fanout[`${modelName}/${id}`] = null;
         }
       }
 
@@ -325,8 +334,8 @@ export default Adapter.extend({
    * Builds the path for a type
    *
    * @param {string} modelName
-   * @param {string} id
-   * @param {Object} adapterOptions
+   * @param {string} [id]
+   * @param {Object} [adapterOptions]
    * @return {string} Path
    * @private
    */
@@ -334,11 +343,15 @@ export default Adapter.extend({
     let path;
 
     if (adapterOptions && adapterOptions.path) {
-      path = `${adapterOptions.path}/${id}`;
+      path = adapterOptions.path;
     } else {
       const parsedModelName = this.parseModelName(modelName);
 
-      path = `${parsedModelName}/${id}`;
+      path = parsedModelName;
+    }
+
+    if (id) {
+      path = `${path}/${id}`;
     }
 
     return path;
@@ -377,7 +390,7 @@ export default Adapter.extend({
    */
   listenForRecordChanges(store, modelName, id, ref) {
     if (!this.isInFastBoot()) {
-      if (!this.isTrackingRecordChanges(modelName, id)) {
+      if (!this.isTracked(modelName, id)) {
         this.trackRecord(modelName, id, ref);
 
         ref.on('value', bind(this, (snapshot) => {
@@ -385,14 +398,35 @@ export default Adapter.extend({
             const snapshotWithId = this.mergeSnapshotIdAndValue(snapshot);
             const normalizedRecord = store.normalize(modelName, snapshotWithId);
 
-            next(() => {
-              store.push(normalizedRecord);
-            });
+            store.push(normalizedRecord);
           } else {
             this.unloadRecord(store, modelName, id);
           }
         }), bind(this, (error) => {
           this.unloadRecord(store, modelName, id);
+        }));
+      }
+    }
+  },
+
+  /**
+   * Listens for changes in the list returned by `findAll()`
+   *
+   * @param {DS.Store} store
+   * @param {string} modelName
+   * @param {firebase.database.Reference} ref
+   * @private
+   */
+  listenForListChanges(store, modelName, ref) {
+    if (!this.isInFastBoot()) {
+      if (!this.isTracked(modelName, 'findAll')) {
+        this.trackList(modelName);
+
+        ref.on('child_added', bind(this, (snapshot) => {
+          const path = this.buildPath(modelName, snapshot.key);
+          const ref = this.buildFirebaseReference(path);
+
+          this.listenForRecordChanges(store, modelName, snapshot.key, ref);
         }));
       }
     }
@@ -411,18 +445,18 @@ export default Adapter.extend({
   },
 
   /**
-   * Checks if changes to record is being tracked
+   * Checks if changes to data is being tracked
    *
    * @param {string} modelName
    * @param {string} id
    * @return {boolean} True if being tracked. Otherwise, false.
    * @private
    */
-  isTrackingRecordChanges(modelName, id) {
-    const trackedRecords = this.get('trackedRecords');
+  isTracked(modelName, id) {
+    const trackerInfo = this.get('trackerInfo');
 
-    if (trackedRecords.hasOwnProperty(modelName)) {
-      if (trackedRecords[modelName].hasOwnProperty(id)) {
+    if (trackerInfo.hasOwnProperty(modelName)) {
+      if (trackerInfo[modelName].hasOwnProperty(id)) {
         return true;
       }
     }
@@ -439,10 +473,34 @@ export default Adapter.extend({
    * @private
    */
   trackRecord(modelName, id, ref) {
-    const trackedRecords = this.get('trackedRecords');
+    const trackerInfo = this.get('trackerInfo');
 
-    trackedRecords[modelName] = {};
-    trackedRecords[modelName][id] = this.parseFirebaseReferencePath(ref);
+    if (!trackerInfo.hasOwnProperty(modelName)) {
+      trackerInfo[modelName] = {};
+    }
+
+    let parsedFirebaseReferencePath = this.parseFirebaseReferencePath(ref);
+
+    parsedFirebaseReferencePath = parsedFirebaseReferencePath.replace(
+        `/${id}`, '');
+
+    trackerInfo[modelName][id] = parsedFirebaseReferencePath;
+  },
+
+  /**
+   * Tracks a find all request
+   *
+   * @param {string} modelName
+   * @private
+   */
+  trackList(modelName) {
+    const trackerInfo = this.get('trackerInfo');
+
+    if (!trackerInfo.hasOwnProperty(modelName)) {
+      trackerInfo[modelName] = {};
+    }
+
+    trackerInfo[modelName]['findAll'] = true;
   },
 
   /**
