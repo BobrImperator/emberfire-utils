@@ -443,22 +443,19 @@ test('should return all records for a model', async function(assert) {
   assert.deepEqual(result, [ this.blogPosts[0], this.blogPosts[1] ]);
 });
 
-test('should error when finding all records for a model but nothing exists', function(assert) {
+test('should return an empty array when no record exists', async function(assert) {
   assert.expect(1);
 
   // Arrange
-  const done = assert.async();
   const adapter = this.subject({
     firebase: this.ref,
   });
 
   // Act
-  run(() => {
-    adapter.findAll(this.store, { modelName: 'foo' }).catch((e) => {
-      done();
-      assert.ok(true);
-    });
-  });
+  const result = await adapter.findAll(this.store, { modelName: 'foo' });
+
+  // Assert
+  assert.deepEqual(result, []);
 });
 
 test('should track changes to list when not in FastBoot', async function(assert) {
@@ -857,7 +854,7 @@ test('should return records that matches the path query params', async function(
   assert.deepEqual(result, [ this.blogPosts[0], this.blogPosts[1] ]);
 });
 
-test('should return no records when nothing matches the query params', async function(assert) {
+test('should return an empty array when no record matches the query params', async function(assert) {
   assert.expect(1);
 
   // Arrange
@@ -1021,43 +1018,6 @@ test('should re-query when loading more records', async function(assert) {
 
   // Assert
   assert.ok(stub.calledOnce);
-});
-
-test('should track query when query params has cacheId and not in FastBoot', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const adapter = this.subject({
-    firebase: this.ref,
-    findRecord: this.adapterFindRecord,
-  });
-
-  // Act
-  await adapter.query(this.store, this.type, {
-    cacheId: 'foo',
-  }, this.recordArray);
-
-  // Assert
-  assert.deepEqual(adapter.get('trackedQueries'), { 'foo': this.recordArray });
-});
-
-test('should not track query when query params has cacheId and in FastBoot', async function(assert) {
-  assert.expect(1);
-
-  // Arrange
-  const adapter = this.subject({
-    firebase: this.ref,
-    fastboot: EmberObject.create({ isFastBoot: true }),
-    findRecord: this.adapterFindRecord,
-  });
-
-  // Act
-  await adapter.query(this.store, this.type, {
-    cacheId: 'foo',
-  }, this.recordArray);
-
-  // Assert
-  assert.deepEqual(adapter.get('trackedQueries'), {});
 });
 
 test('should turn off existing query listener when re-querying it', async function(assert) {
